@@ -59,6 +59,8 @@ pub enum Lang {
     /// );
     /// ```
     Ukrainian,
+    Chinese_Simp,
+    Chinese_Trad,
 }
 
 impl FromStr for Lang {
@@ -73,6 +75,8 @@ impl FromStr for Lang {
     /// | `fr_BE`   | `Lang::French_BE` | quarante-deux |
     /// | `fr_CH`   | `Lang::French_CH` | quarante-deux |
     /// | `uk`      | `Lang::Ukrainian` | сорок два     |
+    /// | `zh_cn`   | `Lang::French_CH` | quarante-deux |
+    /// | `uk`      | `Lang::Ukrainian` | сорок два     |
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         match input {
             "en" => Ok(Self::English),
@@ -80,6 +84,8 @@ impl FromStr for Lang {
             "fr_BE" => Ok(Self::French_BE),
             "fr_CH" => Ok(Self::French_CH),
             "uk" => Ok(Self::Ukrainian),
+            "zh" | "zh_CN" | "zh_cn"  => Ok(Self::Chinese_Simp),
+            "zh_tw"|"zh_hk"|"zh_TW"|"zh_HK"=> Ok(Self::Chinese_Trad),
             _ => Err(()),
         }
     }
@@ -152,6 +158,31 @@ pub fn to_language(lang: Lang, preferences: Vec<String>) -> Box<dyn Language> {
                 .find_map(|d| d.parse().ok())
                 .unwrap_or_default();
             Box::new(lang::Ukrainian::new(gender, number, declension))
+        }
+        Lang::Chinese_Simp=> {
+            let prefer_ling = !preferences
+                .iter()
+                .find(|v| ["〇", "circle", "Circle", "yuan"].contains(&v.as_str()))
+                .is_some();
+            let prefer_yishi = preferences
+                .iter()
+                .find(|v: &&String| ["yishi", "一十", "one_ten", "Yi"].contains(&v.as_str()))
+                .is_some();
+
+            Box::new(lang::Chinese::new(prefer_ling, prefer_yishi, lang::cn::ChineseRegion::Mainland))
+        }
+        Lang::Chinese_Trad=>{
+            let prefer_ling = !preferences
+            .iter()
+            .find(|v| ["〇", "circle", "Circle", "yuan"].contains(&v.as_str()))
+            .is_some();
+            let prefer_yishi = preferences
+            .iter()
+            .find(|v: &&String| ["yishi", "一十", "one_ten", "Yi"].contains(&v.as_str()))
+            .is_some();
+
+            Box::new(lang::Chinese::new(prefer_ling, prefer_yishi, lang::cn::ChineseRegion::Taiwan))
+
         }
     }
 }
