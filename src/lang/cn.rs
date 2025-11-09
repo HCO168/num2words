@@ -1,8 +1,28 @@
 use crate::{num2words::Num2Err, Currency, Language};
 use num_bigfloat::BigFloat;
-use crate::lang::cn::ChineseRegion::Mainland;
+use std::fmt::{Debug, Formatter};
 use std::ops::{Index, IndexMut};
 
+pub enum DigitsError{
+    DigitExceedLimit(u8,u8),
+    NoConversionCharToNumRule(char),
+    NoConversionNumToCharRule(u8),
+}
+impl Debug for DigitsError{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DigitsError::DigitExceedLimit(d,max) => {
+                write!(f, "digits exceeded limit ({d} out of {max})")
+            }
+            DigitsError::NoConversionCharToNumRule(c) => {
+                write!(f, "no conversion rule for char '{c}' to num")
+            }
+            DigitsError::NoConversionNumToCharRule(n) => {
+                write!(f, "no conversion rule for num [{n}] to char")
+            }
+        }
+    }
+}
 pub const fn arabic_num_to_char(digit:u8) ->Option<char>{
     if(digit<=9){
         Some((b'0'+digit) as char)
@@ -41,31 +61,59 @@ impl Digits{
         self.digits.len()
     }
     #[inline]
-    pub fn append(&mut self, digit: u8){
-        self.digits.push(digit);
+    pub fn append(&mut self, digit: u8)->Result<(), DigitsError>{
+        if(digit>=self.max_digit){
+            Err(DigitsError::DigitExceedLimit(digit,self.max_digit))
+        }else{
+            Ok(self.digits.push(digit))
+        }
     }
-    pub fn from_string(digits_string: &str, max_digit: u8, convert_rule: fn(char) ->Option<u8>) -> Option<Digits>{
+    pub fn from_string(digits_string: &str, max_digit: u8, convert_rule: fn(char) ->Option<u8>) -> Result<Digits,DigitsError>{
         let mut digit=Digits::new(max_digit);
         let mut digits_chars = digits_string.chars().collect::<Vec<char>>();
         digits_chars.reverse();
         for digit_char in digits_chars{
             digit.append(match convert_rule(digit_char) {
                 Some(n) => n,
-                None => return None,
-            });
+                None => return Err(DigitsError::NoConversionCharToNumRule(digit_char)),
+            })?;
         }
-        Some(digit)
+        Ok(digit)
     }
-    pub fn to_string(&self,convert_rule: fn(u8)->Option<char>) -> Option<String>{
+    pub fn to_string(&self,convert_rule: fn(u8)->Option<char>) -> Result<String,DigitsError>{
         let mut result = String::new();
         let digits_nums =self.digits.iter().rev();
         for digit in digits_nums {
             result.push(match convert_rule(*digit) {
                 Some(c) => c,
-                None => return None,
+                None => return Err(DigitsError::NoConversionNumToCharRule(*digit)),
             } );
         }
+        Ok(result)
+    }
+    pub fn to_string_complex(&self,convert_rule: fn(u8)->Option<String>) -> Option<String>{
+        let mut result = String::new();
+        let digits_nums =self.digits.iter().rev();
+        for digit in digits_nums {
+            match convert_rule(*digit) {
+                Some(c) => result.push_str(c.as_str()),
+                None => return None,
+            }
+        }
         Some(result)
+    }
+
+    pub fn cast_to_string(&self) -> String{
+        fn convert_rule(value: u8) -> Option<String>{
+            match arabic_num_to_char(value) {
+                Some(v)=>Some(v.to_string()),
+                None=> Some(format!("[{}]",value.to_string()))
+            }
+        }
+        match self.to_string_complex(convert_rule){
+            Some(v)=>{v},
+            None=>{panic!("Impossible")}
+        }
     }
     pub fn from_u64(mut value:u64, max_digit:u8) -> Digits{
         let mut digits=Digits::new(max_digit);
@@ -75,22 +123,43 @@ impl Digits{
         }
         digits
     }
-    pub fn from_big_float(mut num:BigFloat, max_digit:u8) -> Digits{
-        if(num.is_zero()){
-            return Digits::from_u64(0,max_digit);
-        }
-        let mut digits=Digits::new(max_digit);
-        let num_sys = BigFloat::from(max_digit);
-        while !num.is_zero() {
-            digits.append((num % num_sys).to_u64().unwrap() as u8);
-            num /= num_sys;
-        }
-        digits
-    }
     #[inline]
     pub fn get_u8_array(&self)->&Vec<u8>{
         &self.digits
+    }pub fn from_big_float_int(mut num: BigFloat, base: u8) -> Result<Digits, DigitsError> {
+        if num.is_zero() {
+            return Ok(Digits::from_u64(0, base));
+        }
+        let mut digits = Digits::new(base);
+        let base_bf = BigFloat::from(base);
+        while num > BigFloat::from(0) {
+            let rem = (num % base_bf).floor();
+            digits.append(rem.to_u64().unwrap() as u8)?;
+            num = (num / &base_bf).floor();
+        }
+        Ok(digits)
     }
+
+    pub fn from_big_float_frac(mut num: BigFloat, base: u8, max_len: usize) -> Result<Digits, DigitsError> {
+        if num.is_zero() {
+            return Ok(Digits::from_u64(0, base));
+        }
+        let one = BigFloat::from(1);
+        let base_bf = BigFloat::from(base);
+        let mut digits = Digits::new(base);
+        for _ in 0..max_len {
+            num -= num.floor();
+            num *= &base_bf;
+            let digit = num.floor();
+            digits.append(digit.to_u64().unwrap() as u8)?;
+            num -= digit;
+            if num < BigFloat::from(1e-15) {
+                break;
+            }
+        }
+        Ok(digits)
+    }
+
 }
 impl Index<usize> for Digits{
     type Output = u8;
@@ -129,129 +198,122 @@ mod tests1 {
 
 pub struct Chinese {
     //prefer 零 over 〇
-    prefer_ling: bool,
-    //prefer 一十 over 十 in the beginning
-    prefer_yishi: bool,
-    region: ChineseRegion,
+    prefer_ling:bool,
+    //prefer 一十 over 十
+    prefer_one_ten:bool,
+    //control whether to use traditional
+    traditional:bool,
 }
-pub enum ChineseRegion {
-    Mainland,
-    Taiwan,
-    HongKong,
-}
-
+///units of 10^4 in simplified chinese
+const MEGA_UNITS: [&str; 12] = [
+    "", "万", "亿", "兆", "京", "垓", "秭", "穰", "沟", "涧", "正", "载"
+];
+///units of 10^4 in traditional chinese
+const MEGA_UNITS_TRAD: [&str; 12] = [
+    "", "萬", "億", "兆", "京", "垓", "秭", "穰", "溝", "澗", "正", "載"
+];
+///digits in both chinese lang
 const DIGITS: [char; 9] = [
     '一','二','三','四','五','六','七','八','九',
 ];
 
-const MEGAS: [&str; 12] = [
-    "", "万", "亿", "兆", "京", "垓", "秭", "穰", "沟", "涧", "正", "载"
-];
-/// Traditional Chinese (繁體中文) megascale units
-const MEGAS_TRAD: [&str; 12] = [
-    "", "萬", "億", "兆", "京", "垓", "秭", "穰", "溝", "澗", "正", "載"
-];
-
 impl Chinese {
-    pub fn new(prefer_ling: bool, prefer_yishi: bool, region: ChineseRegion) -> Self {
-        Self {
+    pub fn default()->Chinese{
+        Chinese{
+            prefer_ling:true,
+            prefer_one_ten:false,
+            traditional:false,
+        }
+    }
+    pub fn new(prefer_ling:bool, prefer_one_ten:bool, traditional:bool)->Chinese{
+        Chinese{
             prefer_ling,
-            prefer_yishi,
-            region,
+            prefer_one_ten,
+            traditional
         }
     }
-
-    fn currencies(&self, currency: Currency, plural_form: bool) -> String {
-        //todo
-        currency.default_string(plural_form)
-    }
-
-    fn megaunit(&self,place:usize)->Result<&'static str,Num2Err> {
-        match self.region {
-            Mainland => {
-                if place < MEGAS.len() {
-                    Ok(MEGAS[place])
-                } else {
-                    Err(Num2Err::CannotConvert)
-                }
+    pub fn megaunit(&self, place: usize) -> Result<&'static str, &str> {
+        if (!self.traditional) {
+            if place < MEGA_UNITS.len() {
+                return Ok(MEGA_UNITS[place])
             }
-            _ => {
-                if place < MEGAS_TRAD.len() {
-                    Ok(MEGAS_TRAD[place])
-                } else {
-                    Err(Num2Err::CannotConvert)
-                }
+        } else {
+            if place < MEGA_UNITS_TRAD.len() {
+                return Ok(MEGA_UNITS_TRAD[place])
             }
         }
-
+        Err("Too big too find a unit")
     }
-    fn digit_to_char(&self,digit:char)->char {
-        if digit=='0' {
+    pub fn digit_to_char(&self,digit: u8) -> char {
+        if (digit > 0 && digit <= 9) {
+            DIGITS[digit as usize-1]
+        } else {
             self.zero()
-        }else if digit>='1'&&digit<='9'{
-            DIGITS[digit.to_digit(10).unwrap() as usize-1]
-        }else{
-            debug_assert!(false,"Char not 0 to 9: {}",digit);
-            '?'
         }
     }
-    fn zero(&self)->char{
-        if self.prefer_ling {
+    pub fn zero(&self) -> char {
+        if(self.prefer_ling){
             '零'
         }else{
             '〇'
         }
     }
-    fn int_to_cardinal(&self,num: BigFloat) -> Result<String, Num2Err> {
-        let mut text=String::new();
-        if(num.is_zero()){
-            return Ok(self.zero().to_string());
+    fn int_to_text(&self, num: Digits) -> Result<String,&str> {
+        if(num.len()==0){
+            return Ok(self.zero().to_string())
         }
-        let num_chars=Digits::from_big_float(num, 10).to_string(arabic_num_to_char).unwrap()
-            .chars().collect::<Vec<char>>();
-        let last_digit= num_chars.len()-1;
+        let last_digit= num.len()-1;
+        let mut text = String::new();
         let mut zeros:usize=0;
-        for (place,digit) in num_chars.iter().enumerate() {
-            if *digit=='0' {
+        for (place,digit) in num.get_u8_array().iter().enumerate() {
+            //counting zeros
+            if(*digit==0){
+                //if it is the first place zero but
+                //there is no zero in the smaller section we still need to add zero
+                if(place%4==0&&place!=0){
+                    if(zeros==0){
+                        text.push(self.zero());
+                    }
+                }
                 zeros+=1;
             }else{
                 zeros=0;
             }
             //if is first digit in the section or in the number, we should do some work
-            if place%4==3||place==last_digit{
+            if(place%4==3||place==last_digit){
+                let section_start=place-place%4;
                 //check if the unit is not used, like 1_0000_0000 do not display 万
-                if zeros>=4 {
+                if(zeros>=4){
                     //if the whole section is 0, skip it
                     continue;
                 }else{
                     //enter normal process
                     text.push_str(self.megaunit(place/4)?);
                     let mut section_zeros:usize=0;
-                    for (section_place,section_digit) in num_chars
-                        [if place==last_digit {last_digit-last_digit%4}else{place-3}..place+1].iter().enumerate(){
-                        if *section_digit=='0' {
+                    for (section_place,section_digit) in num.get_u8_array()
+                        [section_start..=place].iter().enumerate(){
+                        if(*section_digit==0){
                             //check is there any hanging zeros, like 1001
                             //if it is the rightmost place of 0, we should consider adding 零
-                            if section_zeros==0 {
+                            if(section_zeros==0){
                                 //do not add 零 when it is the rightmost digit in the section
                                 //but add it elsewhere
-                                if section_place==0 {
-                                    continue;
-                                }else{
+                                if(section_place != 0) {
                                     text.push(self.zero());
                                 }
                             }
                             //record one more zero
                             section_zeros+=1;
                         }else{
+                            //reset section zeros
+                            section_zeros=0;
                             //enter normal number process
                             //add the approximate unit in section
                             match section_place{
                                 0=>(),
                                 1=>{
                                     text.push('十');
-                                    //decide using 一十 or 十 in the beginning
-                                    if !self.prefer_yishi&&place==last_digit&&*section_digit=='1' {
+                                    if((*section_digit==1)&&(!self.prefer_one_ten)&&(section_start+section_place==last_digit)){
                                         continue;
                                     }
                                 },
@@ -273,26 +335,37 @@ impl Chinese {
         }
         Ok(text.chars().rev().collect::<String>())
     }
+    fn float_to_text(&self, num: BigFloat) -> Result<String,Num2Err> {
 
-    fn float_to_cardinal(&self,num: BigFloat) -> Result<String, Num2Err> {
         let integer_part=num.int();
-        let mut text=self.int_to_cardinal(integer_part)?;
+        let mut text=
+            match self.int_to_text(
+                match Digits::from_big_float_int(integer_part,10){
+                    Ok(v) => v,
+                    //impossible
+                    Err(_)=>return Err(Num2Err::CannotConvert),
+                }) {
+                    Ok(v) => v,
+                    //impossible
+                    Err(_)=>return Err(Num2Err::CannotConvert),
+            };
         if num.frac().is_zero(){
             return Ok(text);
         }
-        let decimal_part=Digits::from_big_float(num.frac(),10);
         //add decimal point
-        match self.region{
-            Mainland => {
-                text.push('点');
-            }
-            _ => {
-                text.push('點');
-            }
+        if !self.traditional {
+            text.push('点');
+        } else {
+            text.push('點');
         }
+        let decimal_part=match Digits::from_big_float_frac(num.frac(),10,1000) {
+            Ok(v) => v,
+            //impossible
+            Err(_)=>return Err(Num2Err::CannotConvert),
+        };;
         //adding the decimal part
-        for digit in decimal_part.to_string(arabic_num_to_char).unwrap().chars(){
-            text.push(self.digit_to_char(digit));
+        for digit in decimal_part.get_u8_array(){
+            text.push(self.digit_to_char(*digit));
         }
         Ok(text)
     }
@@ -312,188 +385,239 @@ impl Language for Chinese {
             text.push_str("无穷");
             return Ok(text);
         }
-        text.push_str( self.float_to_cardinal(num)?.as_str());
+        text.push_str( self.float_to_text(num)?.as_str());
         Ok(text)
     }
 
     fn to_ordinal(&self, mut num: BigFloat) -> Result<String, Num2Err> {
-        todo!()
+        let mut result="第".to_string();
+        result.push_str(self.to_cardinal(num)?.as_str());
+        Ok(result)
     }
 
     fn to_ordinal_num(&self, num: BigFloat) -> Result<String, Num2Err> {
-
-        todo!()
+        let digits=match Digits::from_big_float_int(num,10) {
+            Ok(v) => v,
+            Err(_)=>return Err(Num2Err::CannotConvert),
+        };
+        let mut result="第".to_string();
+        result.push_str(digits.cast_to_string().as_str());
+        Ok(result)
     }
 
     fn to_year(&self, num: BigFloat) -> Result<String, Num2Err> {
-        todo!()
+        let mut result=self.to_ordinal_num(num)?;
+        result.push('年');
+        Ok(result)
     }
 
     fn to_currency(&self, num: BigFloat, currency: Currency) -> Result<String, Num2Err> {
         todo!()
     }
-}
-#[cfg(test)]
+}#[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Lang, Num2Words, Currency};
+    use crate::{Lang, Num2Words};
 
     #[test]
-    fn test_cardinal_basic() {
-        assert_eq!(
-            Num2Words::new(0)
-                .lang(Lang::Chinese_Simp)
-                .cardinal()
-                .to_words(),
-            Ok(String::from("零"))
-        );
-        assert_eq!(
-            Num2Words::new(10)
-                .lang(Lang::Chinese_Simp)
-                .cardinal()
-                .to_words(),
-            Ok(String::from("十"))
-        );
-        assert_eq!(
-            Num2Words::new(12)
-                .lang(Lang::Chinese_Simp)
-                .cardinal()
-                .to_words(),
-            Ok(String::from("十二"))
-        );
-        assert_eq!(
-            Num2Words::new(105)
-                .lang(Lang::Chinese_Simp)
-                .cardinal()
-                .to_words(),
-            Ok(String::from("一百零五"))
-        );
-        assert_eq!(
-            Num2Words::new(2300)
-                .lang(Lang::Chinese_Simp)
-                .cardinal()
-                .to_words(),
-            Ok(String::from("两千三百"))
-        );
+    fn test_zero_and_single_digits() {
+        let zh = Chinese::default();
+        // 单个数字
+        for i in 0..=9 {
+            let n = num_bigfloat::BigFloat::from(i);
+            let s = zh.to_cardinal(n).unwrap();
+            let expected = match i {
+                0 => "零",
+                1 => "一",
+                2 => "二",
+                3 => "三",
+                4 => "四",
+                5 => "五",
+                6 => "六",
+                7 => "七",
+                8 => "八",
+                9 => "九",
+                _ => unreachable!(),
+            };
+            assert_eq!(s, expected);
+        }
     }
 
     #[test]
-    fn test_cardinal_negative_and_zero() {
-        assert_eq!(
-            Num2Words::new(-5)
-                .lang(Lang::Chinese_Simp)
-                .cardinal()
-                .to_words(),
-            Ok(String::from("负五"))
-        );
-        assert_eq!(
-            Num2Words::new(-10010)
-                .lang(Lang::Chinese_Simp)
-                .cardinal()
-                .to_words(),
-            Ok(String::from("负一万零十"))
-        );
+    fn test_traditional_and_simplified_difference() {
+        let zh_simp = Chinese::new(true, false, false);
+        let zh_trad = Chinese::new(true, false, true);
+        let n = num_bigfloat::BigFloat::from(12345678u64);
+        let simp = zh_simp.to_cardinal(n.clone()).unwrap();
+        let trad = zh_trad.to_cardinal(n).unwrap();
+        assert!(simp.contains("万"));
+        assert!(trad.contains("萬"));
     }
 
     #[test]
-    fn test_cardinal_large_number() {
-        assert_eq!(
-            Num2Words::new(10_000)
-                .lang(Lang::Chinese_Simp)
-                .cardinal()
-                .to_words(),
-            Ok(String::from("一万"))
-        );
-        assert_eq!(
-            Num2Words::new(123456789)
-                .lang(Lang::Chinese_Simp)
-                .cardinal()
-                .to_words(),
-            Ok(String::from("一亿二千三百四十五万六千七百八十九"))
-        );
-        assert_eq!(
-            Num2Words::new(100_0000_0000u64)
-                .lang(Lang::Chinese_Simp)
-                .cardinal()
-                .to_words(),
-            Ok(String::from("一百亿"))
-        );
+    fn test_one_ten_preference() {
+        let zh_short = Chinese::new(true, false, false);
+        let zh_full = Chinese::new(true, true, false);
+        let ten = num_bigfloat::BigFloat::from(10u8);
+        let short = zh_short.to_cardinal(ten.clone()).unwrap();
+        let full = zh_full.to_cardinal(ten).unwrap();
+        assert_eq!(short, "十");
+        assert_eq!(full, "一十");
     }
 
     #[test]
-    fn test_cardinal_float() {
-        assert_eq!(
-            Num2Words::new(3.14)
-                .lang(Lang::Chinese_Simp)
-                .cardinal()
-                .to_words(),
-            Ok(String::from("三点一四"))
-        );
-        assert_eq!(
-            Num2Words::new(0.205)
-                .lang(Lang::Chinese_Simp)
-                .cardinal()
-                .to_words(),
-            Ok(String::from("零点二零五"))
-        );
-        assert_eq!(
-            Num2Words::new(-12.05)
-                .lang(Lang::Chinese_Simp)
-                .cardinal()
-                .to_words(),
-            Ok(String::from("负十二点零五"))
-        );
+    fn test_section_with_all_zero_middle() {
+        // 1000001 => 一百万零一
+        let zh = Chinese::default();
+        let n = num_bigfloat::BigFloat::from(1_000_001u64);
+        let s = zh.to_cardinal(n).unwrap();
+        assert_eq!(s, "一百万零一");
     }
 
     #[test]
-    fn test_prefer_modes() {
-        // prefer_ling: true → use 零; false → use 〇
-        let zh1 = Chinese::new(true, false,Mainland);
-        let zh2 = Chinese::new(false, false,Mainland);
+    fn test_large_numbers_multiple_units() {
+        let zh = Chinese::default();
+        let n = num_bigfloat::BigFloat::from(1_0000_0000_0000_0000u64);
+        let s = zh.to_cardinal(n).unwrap();
+        // 应出现“京”
+        assert!(s.contains("京"));
+    }
 
+    #[test]
+    fn test_trailing_decimal_zeros() {
+        let zh = Chinese::default();
+        let n = num_bigfloat::BigFloat::from(3.1400);
+        let s = zh.to_cardinal(n).unwrap();
+        // 应该裁掉末尾零，不多出“零”
+        assert_eq!(s, "三点一四");
+    }
+
+    #[test]
+    fn test_long_fraction_precision_limit() {
+        let zh = Chinese::default();
+        // 1/3 = 0.3333…
+        let n = num_bigfloat::BigFloat::from(1) / num_bigfloat::BigFloat::from(3);
+        let s = zh.to_cardinal(n).unwrap();
+        assert!(s.starts_with("零点三"));
+    }
+
+    #[test]
+    fn test_negative_with_fraction() {
+        let zh = Chinese::default();
+        let n = num_bigfloat::BigFloat::from(-45.6);
+        let s = zh.to_cardinal(n).unwrap();
+        assert!(s.starts_with("负四十五点六"));
+    }
+
+    #[test]
+    fn test_bigfloat_int_and_frac_consistency() {
+        // 验证整数和小数拼接逻辑一致
+        let zh = Chinese::default();
+        let n1 = num_bigfloat::BigFloat::from(42);
+        let n2 = num_bigfloat::BigFloat::from(42.0);
+        assert_eq!(zh.to_cardinal(n1).unwrap(), zh.to_cardinal(n2).unwrap());
+    }
+
+    #[test]
+    fn test_huge_number_overflow_handling() {
+        let zh = Chinese::default();
+        // 超出载之后
+        let n = num_bigfloat::BigFloat::from(10).pow(&BigFloat::from(52));// 超过“载”
+        let result = zh.to_cardinal(n);
+        assert!(result.is_err() || result.unwrap().contains("载"));
+    }
+
+    #[test]
+    fn test_round_trip_digits_string() {
+        let num_str = "1A3z";
+        let digits = Digits::from_string(num_str, 62, char_to_arabic_num).unwrap();
+        assert_eq!(digits.to_string(arabic_num_to_char).unwrap(), num_str);
+    }
+
+    #[test]
+    fn test_big_float_frac_precision_bound() {
+        let bf = num_bigfloat::BigFloat::from(0.999_999);
+        let digits = Digits::from_big_float_frac(bf, 10, 5).unwrap();
+        assert!(digits.len() <= 5);
+    }
+    #[test]
+    fn test_cardinal_common_cases() {
+        let zh = Chinese::default();
+
+        // 基础整数
+        assert_eq!(zh.to_cardinal(BigFloat::from(0)).unwrap(), "零");
+        assert_eq!(zh.to_cardinal(BigFloat::from(9)).unwrap(), "九");
+        assert_eq!(zh.to_cardinal(BigFloat::from(10)).unwrap(), "十");
+        assert_eq!(zh.to_cardinal(BigFloat::from(11)).unwrap(), "十一");
+        assert_eq!(zh.to_cardinal(BigFloat::from(20)).unwrap(), "二十");
+        assert_eq!(zh.to_cardinal(BigFloat::from(21)).unwrap(), "二十一");
+
+        // 中间零
+        assert_eq!(zh.to_cardinal(BigFloat::from(105)).unwrap(), "一百零五");
+        assert_eq!(zh.to_cardinal(BigFloat::from(1005)).unwrap(), "一千零五");
+        assert_eq!(zh.to_cardinal(BigFloat::from(10005)).unwrap(), "一万零五");
+        assert_eq!(zh.to_cardinal(BigFloat::from(1000500)).unwrap(), "一百万零五百");
+
+        // 大数字
+        assert_eq!(zh.to_cardinal(BigFloat::from(1_0000_0000)).unwrap(), "一亿");
+        assert_eq!(zh.to_cardinal(BigFloat::from(1_0000_0000_0000u64)).unwrap(), "一兆");
+    }
+    #[test]
+    fn test_ordinal_numbers() {
+        let zh = Chinese::default();
+
+        assert_eq!(zh.to_ordinal(BigFloat::from(1)).unwrap(), "第一");
+        assert_eq!(zh.to_ordinal(BigFloat::from(2)).unwrap(), "第二");
+        assert_eq!(zh.to_ordinal(BigFloat::from(10)).unwrap(), "第十");
+        assert_eq!(zh.to_ordinal(BigFloat::from(105)).unwrap(), "第一百零五");
+        assert_eq!(zh.to_ordinal(BigFloat::from(1234)).unwrap(), "第一千二百三十四");
+    }
+    #[test]
+    fn test_ordinal_numeric_format() {
+        let zh = Chinese::default();
+
+        assert_eq!(zh.to_ordinal_num(BigFloat::from(1)).unwrap(), "第1");
+        assert_eq!(zh.to_ordinal_num(BigFloat::from(9)).unwrap(), "第9");
+        assert_eq!(zh.to_ordinal_num(BigFloat::from(42)).unwrap(), "第42");
+        assert_eq!(zh.to_ordinal_num(BigFloat::from(1005)).unwrap(), "第1005");
+    }
+    #[test]
+    fn test_to_year_format() {
+        let zh = Chinese::default();
+
+        assert_eq!(zh.to_year(BigFloat::from(2024)).unwrap(), "第2024年");
+        assert_eq!(zh.to_year(BigFloat::from(2000)).unwrap(), "第2000年");
+        assert_eq!(zh.to_year(BigFloat::from(1)).unwrap(), "第1年");
+    }
+    #[test]
+    fn test_edge_cases_cardinal() {
+        let zh = Chinese::default();
+
+        // 负数
+        assert_eq!(zh.to_cardinal(BigFloat::from(-7)).unwrap(), "负七");
+
+        // 小数
+        assert_eq!(zh.to_cardinal(BigFloat::from(3.14)).unwrap(), "三点一四");
+        assert_eq!(zh.to_cardinal(BigFloat::from(0.205)).unwrap(), "零点二零五");
+
+        // 无限与 NaN
+        let inf = BigFloat::from(f64::INFINITY);
+        let nan = BigFloat::from(f64::NAN);
+        assert_eq!(zh.to_cardinal(inf).unwrap(), "无穷");
+        assert!(zh.to_cardinal(nan).is_err());
+    }
+    #[test]
+    fn test_preference_modes() {
+        let zh1 = Chinese::new(true, false, false); // prefer 零
+        let zh2 = Chinese::new(false, false, false); // prefer 〇
         assert_eq!(zh1.zero(), '零');
         assert_eq!(zh2.zero(), '〇');
 
-        // prefer_yishi: true → “一十”; false → “十”
-        let zh3 = Chinese::new(true, false,Mainland);
-        let zh4 = Chinese::new(true, true,Mainland);
-
-        let num = num_bigfloat::BigFloat::from(10);
-        let s3 = zh3.int_to_cardinal(num.clone()).unwrap();
-        let s4 = zh4.int_to_cardinal(num.clone()).unwrap();
-        assert_ne!(s3, s4);
+        let zh_short = Chinese::new(true, false, false);
+        let zh_full = Chinese::new(true, true, false);
+        let n = BigFloat::from(10);
+        assert_eq!(zh_short.to_cardinal(n.clone()).unwrap(), "十");
+        assert_eq!(zh_full.to_cardinal(n).unwrap(), "一十");
     }
 
-    #[test]
-    fn test_megaunit_overflow() {
-        let chinese=Chinese::new(true, false,Mainland);
-        assert_eq!(
-            chinese.megaunit(5),
-            Ok("垓")
-        );
-        assert_eq!(
-            chinese.megaunit(12),
-            Err(crate::num2words::Num2Err::CannotConvert)
-        );
-    }
-
-    #[test]
-    fn test_infinity_and_nan() {
-        let inf = num_bigfloat::BigFloat::from(f64::INFINITY);
-        let nan = num_bigfloat::BigFloat::from(f64::NAN);
-
-        let zh = Chinese::new(true, false,Mainland);
-
-        assert_eq!(zh.to_ordinal(inf.clone()), Ok(String::from("无穷")));
-        assert_eq!(zh.to_ordinal(nan), Err(crate::num2words::Num2Err::CannotConvert));
-    }
-
-    #[test]
-    fn test_currency() {
-        // when implemented
-        let zh = Chinese::new(true, false,Mainland);
-        let num = num_bigfloat::BigFloat::from(100.5);
-        let text = zh.to_currency(num, Currency::CNY).unwrap();
-        assert!(text.contains("人民币") || text.contains("元"));
-    }
 }

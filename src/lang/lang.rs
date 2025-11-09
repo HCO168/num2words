@@ -59,7 +59,23 @@ pub enum Lang {
     /// );
     /// ```
     Ukrainian,
+    /// Chinese simplified used mainly in mainland China
+    /// ```
+    /// use num2words::{Num2Words, Lang};
+    /// assert_eq!(
+    ///     Num2Words::new(42).lang(Lang::Chinese_Simp).to_words(),
+    ///     Ok(String::from("四十二"))
+    /// );
+    /// ```
     Chinese_Simp,
+    /// Chinese traditional used mainly in Hongkong and Taiwan
+    /// ```
+    /// use num2words::{Num2Words, Lang};
+    /// assert_eq!(
+    ///     Num2Words::new(42000).lang(Lang::Chinese_Trad).to_words(),
+    ///     Ok(String::from("四萬二千"))
+    /// );
+    /// ```
     Chinese_Trad,
 }
 
@@ -68,15 +84,15 @@ impl FromStr for Lang {
 
     /// Parses a string to return a value of this type
     ///
-    /// | Locale    | Lang              | 42            |
-    /// | --------- | ----------------- | ------------- |
-    /// | `en`      | `Lang::English`   | forty-two     |
-    /// | `fr`      | `Lang::French`    | quarante-deux |
-    /// | `fr_BE`   | `Lang::French_BE` | quarante-deux |
-    /// | `fr_CH`   | `Lang::French_CH` | quarante-deux |
-    /// | `uk`      | `Lang::Ukrainian` | сорок два     |
-    /// | `zh_cn`   | `Lang::French_CH` | quarante-deux |
-    /// | `uk`      | `Lang::Ukrainian` | сорок два     |
+    /// | Locale    | Lang                 | 42            |
+    /// | --------- | -------------------- | ------------- |
+    /// | `en`      | `Lang::English`      | forty-two     |
+    /// | `fr`      | `Lang::French`       | quarante-deux |
+    /// | `fr_BE`   | `Lang::French_BE`    | quarante-deux |
+    /// | `fr_CH`   | `Lang::French_CH`    | quarante-deux |
+    /// | `uk`      | `Lang::Ukrainian`    | сорок два     |
+    /// | `zh_cn`   | `Lang::Chinese_Simp` | 四十二         |
+    /// | `zh_hk`   | `Lang::Chinese_Trad` | 四十二         |
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         match input {
             "en" => Ok(Self::English),
@@ -169,7 +185,7 @@ pub fn to_language(lang: Lang, preferences: Vec<String>) -> Box<dyn Language> {
                 .find(|v: &&String| ["yishi", "一十", "one_ten", "Yi"].contains(&v.as_str()))
                 .is_some();
 
-            Box::new(lang::Chinese::new(prefer_ling, prefer_yishi, lang::cn::ChineseRegion::Mainland))
+            Box::new(lang::Chinese::new(prefer_ling, prefer_yishi, false))
         }
         Lang::Chinese_Trad=>{
             let prefer_ling = !preferences
@@ -181,7 +197,7 @@ pub fn to_language(lang: Lang, preferences: Vec<String>) -> Box<dyn Language> {
             .find(|v: &&String| ["yishi", "一十", "one_ten", "Yi"].contains(&v.as_str()))
             .is_some();
 
-            Box::new(lang::Chinese::new(prefer_ling, prefer_yishi, lang::cn::ChineseRegion::Taiwan))
+            Box::new(lang::Chinese::new(prefer_ling, prefer_yishi, true))
 
         }
     }
