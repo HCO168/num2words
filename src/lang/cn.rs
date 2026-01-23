@@ -421,9 +421,7 @@ impl Language for Chinese {
     }
 
     fn to_year(&self, num: BigFloat) -> Result<String, Num2Err> {
-        let mut result = self.to_ordinal_num(num)?;
-        result.push('年');
-        Ok(result)
+        todo!()
     }
 
     fn to_currency(&self, num: BigFloat, currency: Currency) -> Result<String, Num2Err> {
