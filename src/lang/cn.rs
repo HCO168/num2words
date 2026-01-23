@@ -24,22 +24,22 @@ impl Debug for DigitsError{
     }
 }
 pub const fn arabic_num_to_char(digit:u8) ->Option<char>{
-    if(digit<=9){
+    if digit<=9 {
         Some((b'0'+digit) as char)
-    }else if(digit<=35) {
+    }else if digit<=35 {
         Some((b'a'+digit-10) as char)
-    }else if(digit<=61) {
+    }else if digit<=61 {
         Some((b'A'+digit-36) as char)
     }else{
         None
     }
 }
 pub const fn char_to_arabic_num(digit:char) ->Option<u8>{
-    if(digit>='0'&&digit<='9'){
+    if digit>='0'&&digit<='9' {
         Some((digit as u8)-b'0')
-    }else if(digit>='a'&&digit<='z') {
+    }else if digit>='a'&&digit<='z' {
         Some((digit as u8)-b'a'+10)
-    }else if(digit>='A'&&digit<='Z') {
+    }else if digit>='A'&&digit<='Z' {
         Some((digit as u8)-b'A'+36)
     }else{
         None
@@ -62,7 +62,7 @@ impl Digits{
     }
     #[inline]
     pub fn append(&mut self, digit: u8)->Result<(), DigitsError>{
-        if(digit>=self.max_digit){
+        if digit>=self.max_digit {
             Err(DigitsError::DigitExceedLimit(digit,self.max_digit))
         }else{
             Ok(self.digits.push(digit))
@@ -117,7 +117,7 @@ impl Digits{
     }
     pub fn from_u64(mut value:u64, max_digit:u8) -> Digits{
         let mut digits=Digits::new(max_digit);
-        while(value>0){
+        while value>0 {
             digits.append((value % max_digit as u64) as u8);
             value/=max_digit as u64;
         }
@@ -144,7 +144,6 @@ impl Digits{
         if num.is_zero() {
             return Ok(Digits::from_u64(0, base));
         }
-        let one = BigFloat::from(1);
         let base_bf = BigFloat::from(base);
         let mut digits = Digits::new(base);
         for _ in 0..max_len {
@@ -165,12 +164,12 @@ impl Index<usize> for Digits{
     type Output = u8;
 
     fn index(&self, index: usize) -> &Self::Output {
-        &self.digits[(index)]
+        &self.digits[index]
     }
 }
 impl IndexMut<usize> for Digits{
     fn index_mut(&mut self, index: usize) -> &mut Self::Output{
-        &mut self.digits[(index)]
+        &mut self.digits[index]
     }
 }
 #[cfg(test)]
@@ -233,7 +232,7 @@ impl Chinese {
         }
     }
     pub fn megaunit(&self, place: usize) -> Result<&'static str, &str> {
-        if (!self.traditional) {
+        if !self.traditional {
             if place < MEGA_UNITS.len() {
                 return Ok(MEGA_UNITS[place])
             }
@@ -245,21 +244,21 @@ impl Chinese {
         Err("Too big too find a unit")
     }
     pub fn digit_to_char(&self,digit: u8) -> char {
-        if (digit > 0 && digit <= 9) {
+        if digit > 0 && digit <= 9 {
             DIGITS[digit as usize-1]
         } else {
             self.zero()
         }
     }
     pub fn zero(&self) -> char {
-        if(self.prefer_ling){
+        if self.prefer_ling {
             '零'
         }else{
             '〇'
         }
     }
     fn int_to_text(&self, num: Digits) -> Result<String,&str> {
-        if(num.len()==0){
+        if num.len()==0 {
             return Ok(self.zero().to_string())
         }
         let last_digit= num.len()-1;
@@ -267,11 +266,11 @@ impl Chinese {
         let mut zeros:usize=0;
         for (place,digit) in num.get_u8_array().iter().enumerate() {
             //counting zeros
-            if(*digit==0){
+            if *digit==0 {
                 //if it is the first place zero but
                 //there is no zero in the smaller section we still need to add zero
-                if(place%4==0&&place!=0){
-                    if(zeros==0){
+                if place%4==0&&place!=0 {
+                    if zeros==0 {
                         text.push(self.zero());
                     }
                 }
@@ -280,10 +279,10 @@ impl Chinese {
                 zeros=0;
             }
             //if is first digit in the section or in the number, we should do some work
-            if(place%4==3||place==last_digit){
+            if place%4==3||place==last_digit {
                 let section_start=place-place%4;
                 //check if the unit is not used, like 1_0000_0000 do not display 万
-                if(zeros>=4){
+                if zeros>=4 {
                     //if the whole section is 0, skip it
                     continue;
                 }else{
@@ -292,13 +291,13 @@ impl Chinese {
                     let mut section_zeros:usize=0;
                     for (section_place,section_digit) in num.get_u8_array()
                         [section_start..=place].iter().enumerate(){
-                        if(*section_digit==0){
+                        if *section_digit==0 {
                             //check is there any hanging zeros, like 1001
                             //if it is the rightmost place of 0, we should consider adding 零
-                            if(section_zeros==0){
+                            if section_zeros==0 {
                                 //do not add 零 when it is the rightmost digit in the section
                                 //but add it elsewhere
-                                if(section_place != 0) {
+                                if section_place != 0 {
                                     text.push(self.zero());
                                 }
                             }
@@ -313,7 +312,7 @@ impl Chinese {
                                 0=>(),
                                 1=>{
                                     text.push('十');
-                                    if((*section_digit==1)&&(!self.prefer_one_ten)&&(section_start+section_place==last_digit)){
+                                    if (*section_digit==1)&&(!self.prefer_one_ten)&&(section_start+section_place==last_digit) {
                                         continue;
                                     }
                                 },
@@ -362,7 +361,7 @@ impl Chinese {
             Ok(v) => v,
             //impossible
             Err(_)=>return Err(Num2Err::CannotConvert),
-        };;
+        };
         //adding the decimal part
         for digit in decimal_part.get_u8_array(){
             text.push(self.digit_to_char(*digit));
