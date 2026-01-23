@@ -100,8 +100,8 @@ impl FromStr for Lang {
             "fr_BE" => Ok(Self::French_BE),
             "fr_CH" => Ok(Self::French_CH),
             "uk" => Ok(Self::Ukrainian),
-            "zh" | "zh_CN" | "zh_cn"  => Ok(Self::Chinese_Simp),
-            "zh_tw"|"zh_hk"|"zh_TW"|"zh_HK"=> Ok(Self::Chinese_Trad),
+            "zh" | "zh_CN" | "zh_cn" => Ok(Self::Chinese_Simp),
+            "zh_tw" | "zh_hk" | "zh_TW" | "zh_HK" => Ok(Self::Chinese_Trad),
             _ => Err(()),
         }
     }
@@ -128,10 +128,16 @@ pub fn to_language(lang: Lang, preferences: Vec<String>) -> Box<dyn Language> {
                 .is_some();
             let reformed = preferences
                 .iter()
-                .find(|v: &&String| ["reformed", "1990", "rectifié", "rectification"].contains(&v.as_str()))
+                .find(|v: &&String| {
+                    ["reformed", "1990", "rectifié", "rectification"].contains(&v.as_str())
+                })
                 .is_some();
 
-            Box::new(lang::French::new(feminine, reformed, lang::fr::RegionFrench::FR))
+            Box::new(lang::French::new(
+                feminine,
+                reformed,
+                lang::fr::RegionFrench::FR,
+            ))
         }
         Lang::French_BE => {
             let feminine = preferences
@@ -140,10 +146,16 @@ pub fn to_language(lang: Lang, preferences: Vec<String>) -> Box<dyn Language> {
                 .is_some();
             let reformed = preferences
                 .iter()
-                .find(|v: &&String| ["reformed", "1990", "rectifié", "rectification"].contains(&v.as_str()))
+                .find(|v: &&String| {
+                    ["reformed", "1990", "rectifié", "rectification"].contains(&v.as_str())
+                })
                 .is_some();
 
-            Box::new(lang::French::new(feminine, reformed, lang::fr::RegionFrench::BE))
+            Box::new(lang::French::new(
+                feminine,
+                reformed,
+                lang::fr::RegionFrench::BE,
+            ))
         }
         Lang::French_CH => {
             let feminine = preferences
@@ -152,10 +164,16 @@ pub fn to_language(lang: Lang, preferences: Vec<String>) -> Box<dyn Language> {
                 .is_some();
             let reformed = preferences
                 .iter()
-                .find(|v: &&String| ["reformed", "1990", "rectifié", "rectification"].contains(&v.as_str()))
+                .find(|v: &&String| {
+                    ["reformed", "1990", "rectifié", "rectification"].contains(&v.as_str())
+                })
                 .is_some();
 
-            Box::new(lang::French::new(feminine, reformed, lang::fr::RegionFrench::CH))
+            Box::new(lang::French::new(
+                feminine,
+                reformed,
+                lang::fr::RegionFrench::CH,
+            ))
         }
         Lang::Ukrainian => {
             let declension: lang::uk::Declension = preferences
@@ -175,7 +193,7 @@ pub fn to_language(lang: Lang, preferences: Vec<String>) -> Box<dyn Language> {
                 .unwrap_or_default();
             Box::new(lang::Ukrainian::new(gender, number, declension))
         }
-        Lang::Chinese_Simp=> {
+        Lang::Chinese_Simp => {
             let prefer_ling = !preferences
                 .iter()
                 .find(|v| ["〇", "circle", "Circle", "yuan"].contains(&v.as_str()))
@@ -187,18 +205,17 @@ pub fn to_language(lang: Lang, preferences: Vec<String>) -> Box<dyn Language> {
 
             Box::new(lang::Chinese::new(prefer_ling, prefer_yishi, false))
         }
-        Lang::Chinese_Trad=>{
+        Lang::Chinese_Trad => {
             let prefer_ling = !preferences
-            .iter()
-            .find(|v| ["〇", "circle", "Circle", "yuan"].contains(&v.as_str()))
-            .is_some();
+                .iter()
+                .find(|v| ["〇", "circle", "Circle", "yuan"].contains(&v.as_str()))
+                .is_some();
             let prefer_yishi = preferences
-            .iter()
-            .find(|v: &&String| ["yishi", "一十", "one_ten", "Yi"].contains(&v.as_str()))
-            .is_some();
+                .iter()
+                .find(|v: &&String| ["yishi", "一十", "one_ten", "Yi"].contains(&v.as_str()))
+                .is_some();
 
             Box::new(lang::Chinese::new(prefer_ling, prefer_yishi, true))
-
         }
     }
 }
